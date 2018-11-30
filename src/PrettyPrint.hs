@@ -62,7 +62,7 @@ instance Monoid Doc where
 
 
 -- The document `text s` is the literal `s`.
--- The string should not contain any newline ('\n') characters. 
+-- The string should not contain any newline ('\n') characters.
 text :: String -> Doc
 text "" = Empty
 text s  = Text s Empty
@@ -126,7 +126,7 @@ best w _ (Line b j d)  = Line b j (best w j d)
 best w k (Union d1 d2) = better w k (best w k d1) (best w k d2)
     where better w k d1 d2    = if fits (w - k) d1 then d1 else d2
 
-          fits w _ | w < 0    = False
+          fits w _            | w < 0    = False
           fits _ Empty        = True
           fits w (Text s d)   = fits (w - length s) d
           fits _ (Line _ _ _) = True
