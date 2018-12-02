@@ -1,0 +1,28 @@
+<root error-quote=""">
+
+  <!-- T-h-i-s i-s a c-o-m-m-e-n-t -->
+
+  <LongText> Delightful remarkably mr on announcing themselves entreaties favourable. About to in so terms voice at. Equal an would is found seems of. The particular friendship one sufficient terminated frequently themselves. It more shed went up is roof if loud case. Delay music in lived noise an. Beyond genius really enough passed is up.  </LongText>
+
+  <Many-Attributes paradigm="Functional" language="Haskell" typing="static" garbage-collected="True" _compiler="ghc" />
+
+  <!-- keep following -->
+
+  <special_characters>
+    Exclamation: !
+    At symbol: @
+    Pound sign: #
+    Dollar sign: $
+    Percentage: %
+    Error-quote: "
+    <!-- There are a few more -->
+    Period: .
+    Comma: ,
+    Question: ?
+  </special_characters            >
+
+  <EmptyTag></EmptyTag>
+
+  <!-- Finally reached the end -->
+
+</root>
