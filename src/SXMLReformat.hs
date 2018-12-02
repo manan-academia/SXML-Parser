@@ -76,9 +76,9 @@ f &&& g = \ x -> f x && g x
 
 
 parseText :: Parser String
-parseText = skipSpaces >> many1L aux
+parseText = many1L aux
     where
-      aux = satisfy (\ c -> not (c == '<' || c == '>' || c == ' '))
+      aux = satisfy (\ c -> not (c == '<' || c == '>' || isSpace c))
 
 
 parseItem :: Parser Item
@@ -89,53 +89,52 @@ parseItem = choice [elt, text']
 
 
 parseAttValue :: Parser String
-parseAttValue = skipSpaces >> manyL aux
+parseAttValue = manyL (char ' ' +++ aux)
     where
-      aux = satisfy (\ c -> not (c == '<' || c == '>' || c == '\"'))
+      aux = satisfy (\ c -> not (c == '<' || c == '>' || c == '\"' || isSpace c))
 
 
 parseAttribute :: Parser Att
 parseAttribute = do
-                  name <- char ' ' >> skipSpaces >> many1L letter
+                  name <- parseName
                   char '=' >> char '\"'
-                  value <- skipSpaces >> parseAttValue
-                  skipSpaces >> char '\"'
+                  value <- parseAttValue
+                  char '\"'
                   return (Att name value)
 
 
 parseName :: Parser String
-parseName = many1L (choice [char ':', char '_', letter])
-            +++
-            manyL (choice [char ':', char '_', char '-', char '.', alphanum])
+parseName = do
+             f <- choice [char ':', char '_', letter]
+             r <- manyL aux
+             return (f : r)
+    where
+      aux = choice [char ':', char '-', char '_', char '.', alphanum]
 
 
 parseEndTag :: String -> Parser ()
 parseEndTag s = do
-                 skipSpaces
                  string "</"
                  string s
                  skipSpaces
-                 token $ char '>'
+                 char '>'
                  return ()
 
 
 parseStartTag :: Parser (String, [Att])
 parseStartTag = do
-                  skipSpaces >> char '<'
-                  tag <- manyL letter
-                  atts <- manyL parseAttribute
-                  skipSpaces
-                  token $ char '>'
+                  char '<'
+                  tag <- parseName
+                  atts <- manyL (skipMany1L (char ' ') >> parseAttribute)
+                  skipSpaces >> char '>'
                   return (tag, atts)
 
 
 parseSETagElt :: Parser Elt
 parseSETagElt = do
                   (tag, attrs) <- parseStartTag
-                  -- parseMisc
-                  items <- {- parseMisc >> -} skipSpaces >> manyL parseItem
-                  -- parseMisc
-                  skipSpaces
+                  items <- manyL (manyL parseMisc >> parseItem)
+                  manyL parseMisc
                   parseEndTag tag
                   return (Elt tag attrs items)
 
@@ -143,61 +142,78 @@ parseSETagElt = do
 parseEmptyTagElt :: Parser Elt
 parseEmptyTagElt = do
                     char '<'
-                    s <- manyL letter
-                    --skipSpaces
-                    a <- manyL parseAttribute
-                    skipSpaces >> token (string "/>")
+                    s <- parseName
+                    a <- manyL (skipMany1L (char ' ') >> parseAttribute)
+                    skipSpaces >> string "/>"
                     return (Elt s a [])
 
 
 parseElement :: Parser Elt
 parseElement = choice [parseEmptyTagElt, parseSETagElt]
 
+
 parseComment :: Parser ()
-parseComment = between (string "<!--") (string "-->") (skipManyA (manyL aux))
+parseComment = between (string "<!--") (string "-->") (skipManyL aux)
     where
-      aux = satisfy (\ c -> not (c == '-' && c == '-'))
+      aux = condition +++ (char '-' >> condition)
+      condition = satisfy (/= '-')
+
+
+parseSpaces :: Parser ()
+parseSpaces = skipMany1L space
 
 
 parseMisc :: Parser ()
-parseMisc = skipManyA $ choice [skipMany1A skipSpaces, parseComment]
+parseMisc = parseComment +++ parseSpaces
 
 
 sxmlP :: Parser SXML
 sxmlP = SXML <$> do
-                   --parseMisc
-                   skipSpaces
+                   manyL parseMisc
                    e <- parseElement
-                   skipSpaces
-                   --parseMisc
+                   manyL parseMisc
                    return e
 
 
 printItems :: [Item] -> Doc
 printItems []             = empty
-printItems (IText x : xs) = text " " <+> text x <+> text " " <+> printItems xs
-printItems (IElt x : xs)  = printElement x <+> printItems xs
+printItems xs = fillSep (printItems' <$> xs)
+    where
+      printItems' (IText x) = text x
+      printItems' (IElt x)  = printElement x True
 
 
 printAttributes :: [Att] -> Doc
-printAttributes xs = foldr (\ x acc -> text " " <+> (text (fst $ decompose x) <+> text "=\""
-                                                <+> text (snd $ decompose x) <+> text "\"") <+> acc) empty xs
-
+printAttributes [] = empty
+printAttributes xs = text " " <+> fillSep ((<$>) decompose xs)
     where
-      decompose (Att name value) = (name, value)
+      decompose (Att name value) = text name <+> text "=" <+> text "\""
+                               <+> text value <+> text "\""
 
 
-printElement :: Elt -> Doc
-printElement (Elt name attrs items) = group $ text "<" <+> text name <+> printAttributes attrs <+>
-                                                 if null items
-                                                   then text " />"
-                                                   else text ">" <+> slbreak <+> nest 2 (printItems items)
-                                                    <+> text "<" <+> text "/"
-                                                    <+> text name <+> text ">"
+
+printElement :: Elt -> Bool -> Doc
+printElement (Elt name attrs items) c = group $ do
+                                          let start = if c
+                                                        then nest (length name + 2) startTag
+                                                        else startTag
+                                          let d2 = if null items then empty else lbreak <+>
+                                                                  nest (length name + 2) (printItems items)
+                                                              <+> slbreak
+                                          let end = if null items then empty else endTag
+                                          vsep [start, d2, end]
+    where
+      startTag = text "<" <+> text name
+             <+> nest (length name + 2) (printAttributes attrs)
+             <+> if null items
+                  then text " />" <+> slbreak
+                  else text ">" <+> slbreak
+      endTag = slbreak <+> text "<" <+> text "/"
+           <+> text name <+> text ">" <+> lbreak
 
 
 sxmlD :: SXML -> Doc
-sxmlD (SXML ast) = printElement ast
+sxmlD (SXML ast) = printElement ast False
 
 {-
 
@@ -208,7 +224,15 @@ SXML documents produced by `sxmlD`.
 
 -----
 
-<<Your answer here.>>
+sxmlD starts of with printing the initial element. On encountering an attribute/s it hands of
+the control to the function that generates attribute doc (printAttributes). printAttributes tries
+its best to fill the content to the given width and when the content is exceeded it jumps of to
+the next line with indentation. After the attributes are printed depending on the number of items present
+the printItems functions is called recursively to generate the remaining docs. printItems in turn calls
+the printElement and printText to print the respective elements. printItems also tries its best to fill
+the content completely according to the width specified. Finally after all the internal elements are
+generated, the root tag is closed and group is applied so that the best layout is chosen. The ugly aspect
+of the document generated is that it has some indentation issues.
 
 -}
 
@@ -217,12 +241,18 @@ SXML documents produced by `sxmlD`.
 main :: IO ()
 main = do
         content <- getContents
-        --print $ parseMaybe sxmlP (join (lines content))
+        args <- getArgs
+        let width = if length args == 1 && isInt (head args)
+                     then read (head args)
+                     else 60
         case parseMaybe sxmlP (join $ lines content) of
-           Just x  -> pprint 60 (sxmlD x)
-           Nothing -> putStrLn "** PARSE ERROR **"
+            Just doc -> pprint width (sxmlD doc)
+            Nothing  -> putStrLn "** PARSE ERROR **"
         return ()
 
+
+isInt :: String -> Bool
+isInt = foldr(\x acc -> isDigit x && acc) True
 {-
 
 $ runhaskell SXMLReformat < gettysburg.sxml
@@ -230,32 +260,3 @@ $ runhaskell SXMLReformat < gettysburg.sxml
 $ runhaskell sXMLReformat 40 < gettysburg.sxml
 
 -}
-
-sampleText :: String
-sampleText = "<document>" ++
-  "<section number=\"1\">" ++
-    "<p color=\"red\">" ++
-      "This paragraph" ++
-      "is <b>red</b> " ++
-      "." ++
-    "</p>"++
-    "<p size=\"20\">"++
-      "This paragraph" ++
-      "is <b>big</b>" ++
-      "."++
-    "</p>"++
-    "<p font=\"Times\""++
-       " color=\"red\""++
-       " size=\"20\"" ++
-       " align=\"center\">"++
-      "This paragraph" ++
-      "is" ++
-      "<b>" ++
-        "quite fancy"++
-      "</b>" ++
-      "." ++
-    "</p>"++
-    "<img src=\"logo.png\"" ++
-         " alt=\"logo\"/>" ++
-  "</section>" ++
-  "</document>"
